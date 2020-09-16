@@ -476,6 +476,7 @@ func updateProwJobState(c reconciler, key string, newPipelineRun bool, pj *prowj
 		newpj.Status.State = state
 		newpj.Status.Description = msg
 		newpj.Status.URL = c.pipelineRunURL(*pj)
+		logrus.Infof("dashboard url: %s", newpj.Status.URL)
 		logrus.Infof("Update ProwJob/%s: %s -> %s: %s", key, haveState, state, msg)
 
 		if _, err := c.patchProwJob(pj, newpj); err != nil {
