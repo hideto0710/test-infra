@@ -51,6 +51,7 @@ type options struct {
 	configPath             string
 	kubeconfig             string
 	totURL                 string
+	dashboardURL           string
 	instrumentationOptions prowflagutil.InstrumentationOptions
 }
 
@@ -65,6 +66,7 @@ func parseOptions() options {
 func (o *options) parse(flags *flag.FlagSet, args []string) error {
 	flags.BoolVar(&o.allContexts, "all-contexts", false, "Monitor all cluster contexts, not just default")
 	flags.StringVar(&o.totURL, "tot-url", "", "Tot URL")
+	flags.StringVar(&o.dashboardURL, "dashboard-url", "", "Tekton Dashbord URL")
 	flags.StringVar(&o.kubeconfig, "kubeconfig", "", "Path to kubeconfig. Only required if out of cluster")
 	flags.StringVar(&o.configPath, "config", "", "Path to prow config.yaml")
 	o.instrumentationOptions.AddFlags(flags)
@@ -168,6 +170,7 @@ func main() {
 		pji:             pjif.Prow().V1().ProwJobs(),
 		pipelineConfigs: pipelineConfigs,
 		totURL:          o.totURL,
+		dashboardURL:    o.dashboardURL,
 		prowConfig:      configAgent.Config,
 		rl:              kube.RateLimiter(controllerName),
 	}

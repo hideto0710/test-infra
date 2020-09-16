@@ -62,6 +62,8 @@ type controller struct {
 	pipelines map[string]pipelineConfig
 	totURL    string
 
+	dashboardURL  string
+
 	pjLister   prowjoblisters.ProwJobLister
 	pjInformer cache.SharedIndexInformer
 
@@ -80,6 +82,7 @@ type controllerOptions struct {
 	pji             prowjobinfov1.ProwJobInformer
 	pipelineConfigs map[string]pipelineConfig
 	totURL          string
+	dashboardURL    string
 	prowConfig      config.Getter
 	rl              workqueue.RateLimitingInterface
 }
@@ -274,6 +277,7 @@ type reconciler interface {
 	deletePipelineRun(context, namespace, name string) error
 	createPipelineRun(context, namespace string, b *pipelinev1alpha1.PipelineRun) (*pipelinev1alpha1.PipelineRun, error)
 	pipelineID(prowjobv1.ProwJob) (string, string, error)
+	pipelineRunURL(prowjobv1.ProwJob) string
 	now() metav1.Time
 }
 
@@ -349,6 +353,13 @@ func (c *controller) pipelineID(pj prowjobv1.ProwJob) (string, string, error) {
 		logrus.WithFields(pjutil.ProwJobFields(&pj)).WithError(err).Error("Error calculating job status url")
 	}
 	return id, url, nil
+}
+
+func (c *controller) pipelineRunURL(pj prowjobv1.ProwJob) string  {
+	if len(c.dashboardURL) > 0 {
+		return fmt.Sprintf("%s/#/namespaces/%s/pipelineruns/%s", c.dashboardURL, pj.Spec.Namespace, pj.Name)
+	}
+	return ""
 }
 
 // reconcile ensures a tekton prowjob has a corresponding pipeline, updating the prowjob's status as the pipeline progresses.
@@ -464,6 +475,7 @@ func updateProwJobState(c reconciler, key string, newPipelineRun bool, pj *prowj
 		}
 		newpj.Status.State = state
 		newpj.Status.Description = msg
+		newpj.Status.URL = c.pipelineRunURL(*pj)
 		logrus.Infof("Update ProwJob/%s: %s -> %s: %s", key, haveState, state, msg)
 
 		if _, err := c.patchProwJob(pj, newpj); err != nil {
