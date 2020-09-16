@@ -147,6 +147,8 @@ func newController(opts controllerOptions) (*controller, error) {
 		workqueue:  opts.rl,
 		recorder:   recorder,
 		totURL:     opts.totURL,
+
+		dashboardURL: opts.dashboardURL,
 	}
 
 	logrus.Info("Setting up event handlers")
