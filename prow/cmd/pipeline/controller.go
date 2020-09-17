@@ -17,11 +17,13 @@ limitations under the License.
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	prowjobv1 "k8s.io/test-infra/prow/apis/prowjobs/v1"
@@ -57,12 +59,11 @@ const (
 )
 
 type controller struct {
-	config    config.Getter
-	pjc       prowjobset.Interface
-	pipelines map[string]pipelineConfig
-	totURL    string
-
-	dashboardURL  string
+	config               config.Getter
+	pjc                  prowjobset.Interface
+	pipelines            map[string]pipelineConfig
+	totURL    			 string
+	dashboardURLTemplate *template.Template
 
 	pjLister   prowjoblisters.ProwJobLister
 	pjInformer cache.SharedIndexInformer
@@ -77,14 +78,14 @@ type controller struct {
 }
 
 type controllerOptions struct {
-	kc              kubernetes.Interface
-	pjc             prowjobset.Interface
-	pji             prowjobinfov1.ProwJobInformer
-	pipelineConfigs map[string]pipelineConfig
-	totURL          string
-	dashboardURL    string
-	prowConfig      config.Getter
-	rl              workqueue.RateLimitingInterface
+	kc                   kubernetes.Interface
+	pjc                  prowjobset.Interface
+	pji                  prowjobinfov1.ProwJobInformer
+	pipelineConfigs      map[string]pipelineConfig
+	totURL               string
+	dashboardURLTemplate string
+	prowConfig           config.Getter
+	rl                   workqueue.RateLimitingInterface
 }
 
 // pjNamespace retruns the prow namespace from configuration
@@ -131,6 +132,10 @@ func newController(opts controllerOptions) (*controller, error) {
 	if err := prowjobscheme.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
+	tpl, err := template.New("dashboardURLTemplate").Parse(opts.dashboardURLTemplate)
+	if err != nil {
+		return nil, err
+	}
 
 	// Log to events
 	eventBroadcaster := record.NewBroadcaster()
@@ -139,16 +144,15 @@ func newController(opts controllerOptions) (*controller, error) {
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, untypedcorev1.EventSource{Component: controllerName})
 
 	c := &controller{
-		config:     opts.prowConfig,
-		pjc:        opts.pjc,
-		pipelines:  opts.pipelineConfigs,
-		pjLister:   opts.pji.Lister(),
-		pjInformer: opts.pji.Informer(),
-		workqueue:  opts.rl,
-		recorder:   recorder,
-		totURL:     opts.totURL,
-
-		dashboardURL: opts.dashboardURL,
+		config:               opts.prowConfig,
+		pjc:                  opts.pjc,
+		pipelines:            opts.pipelineConfigs,
+		pjLister:             opts.pji.Lister(),
+		pjInformer:           opts.pji.Informer(),
+		workqueue:            opts.rl,
+		recorder:             recorder,
+		totURL:               opts.totURL,
+		dashboardURLTemplate: tpl,
 	}
 
 	logrus.Info("Setting up event handlers")
@@ -279,7 +283,7 @@ type reconciler interface {
 	deletePipelineRun(context, namespace, name string) error
 	createPipelineRun(context, namespace string, b *pipelinev1alpha1.PipelineRun) (*pipelinev1alpha1.PipelineRun, error)
 	pipelineID(prowjobv1.ProwJob) (string, string, error)
-	pipelineRunURL(prowjobv1.ProwJob) string
+	pipelineRunURL(prowjobv1.ProwJob) (string, error)
 	now() metav1.Time
 }
 
@@ -357,11 +361,12 @@ func (c *controller) pipelineID(pj prowjobv1.ProwJob) (string, string, error) {
 	return id, url, nil
 }
 
-func (c *controller) pipelineRunURL(pj prowjobv1.ProwJob) string  {
-	if len(c.dashboardURL) > 0 {
-		return fmt.Sprintf("%s/#/namespaces/%s/pipelineruns/%s", c.dashboardURL, pj.Spec.Namespace, pj.Name)
+func (c *controller) pipelineRunURL(pj prowjobv1.ProwJob) (string, error) {
+	var tpl bytes.Buffer
+	if err := c.dashboardURLTemplate.Execute(&tpl, pj); err != nil {
+		return "", err
 	}
-	return ""
+	return tpl.String(), nil
 }
 
 // reconcile ensures a tekton prowjob has a corresponding pipeline, updating the prowjob's status as the pipeline progresses.
@@ -477,7 +482,11 @@ func updateProwJobState(c reconciler, key string, newPipelineRun bool, pj *prowj
 		}
 		newpj.Status.State = state
 		newpj.Status.Description = msg
-		newpj.Status.URL = c.pipelineRunURL(*pj)
+		url, err := c.pipelineRunURL(*pj)
+		if err != nil {
+			logrus.WithError(err).Warnf("Ignoring invalid dashboard URL substitution: %v", pj)
+		}
+		newpj.Status.URL = url
 		logrus.Infof("Update ProwJob/%s: %s -> %s: %s", key, haveState, state, msg)
 
 		if _, err := c.patchProwJob(pj, newpj); err != nil {
