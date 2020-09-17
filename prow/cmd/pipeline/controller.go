@@ -62,7 +62,7 @@ type controller struct {
 	config               config.Getter
 	pjc                  prowjobset.Interface
 	pipelines            map[string]pipelineConfig
-	totURL    			 string
+	totURL               string
 	dashboardURLTemplate *template.Template
 
 	pjLister   prowjoblisters.ProwJobLister
